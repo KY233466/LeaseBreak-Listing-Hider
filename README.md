@@ -1,66 +1,32 @@
-# React Chrome Extension Template
+# LeaseBreak Listing Hider
 
-This is a template for creating a Chrome extension using React and [Vite](https://vitejs.dev/) with TypeScript.
+A Chrome extension (only active on `https://www.leasebreak.com`) that hides listings you're not interested in from search results.
 
+## How it works
 
-## Getting Started
+- Listings are tracked by ID, e.g. `410557` from `https://www.leasebreak.com/short-term-rental-details/410557/just-posted`.
+- On search pages (e.g. `/advanced-search?page=2`), any `<div id="listing{ID}">` for a hidden ID is hidden with CSS.
+- Ways to hide a listing:
+  - **Listing page:** click the floating "✕ Not interested" button (bottom-right). Click again to undo.
+  - **Search results:** click "✕ Hide" in the top-right corner of a card.
+  - **Popup:** click the extension icon, then paste an ID or URL, or click "Hide" for the listing you're on.
+- **Save:** each card and listing page also has a "☆ Save" button. Saved listings get a soft yellow background in search results. Click again to unsave.
+- **Auto-hide "Just a Room":** a toggle in the popup. When on, any search result whose text contains "Just a Room" is hidden and added to the hidden list automatically. Saved listings are skipped, and a listing you remove from the hidden list in the popup won't be auto-hidden again.
+- The popup lists saved and hidden IDs; click "Remove" to take one off a list.
+- IDs are saved in `chrome.storage.local`, so they stay on this browser profile.
 
-### Prerequisites
-
-Make sure you have [Node.js](https://nodejs.org/) (version 18+ or 20+) installed on your machine.
-
-### Setup
-
-1. Clone or fork the repository :
-
-    ```sh
-    # To clone
-    git clone https://github.com/5tigerjelly/chrome-extension-react-template
-    cd chrome-extension-react-template
-    ```
-
-2. Install the dependencies:
-
-    ```sh
-    npm install
-    ```
-
-## 🏗️ Development
-
-To start the development server:
+## Build & install
 
 ```sh
-npm run dev
-```
-
-This will start the Vite development server and open your default browser.
-
-## 📦 Build 
-
-To create a production build:
-
-```sh
+npm install
 npm run build
 ```
 
-This will generate the build files in the `build` directory.
+Then open `chrome://extensions`, turn on **Developer mode**, click **Load unpacked**, and select the `build/` folder.
+After making changes, run `npm run build` again and click the reload icon on the extension card.
 
-## 📂 Load Extension in Chrome
+## Project structure
 
-1. Open Chrome and navigate to `chrome://extensions/`.
-2. Enable "Developer mode" using the toggle switch in the top right corner.
-3. Click "Load unpacked" and select the `build` directory.
-
-Your React app should now be loaded as a Chrome extension!
-
-## 🗂️ Project Structure
-
-- `public/`: Contains static files and the `manifest.json`.
-- `src/`: Contains the React app source code.
-- `vite.config.ts`: Vite configuration file.
-- `tsconfig.json`: TypeScript configuration file.
-- `package.json`: Contains the project dependencies and scripts.
-
-## License
-
-This project is licensed under the MIT License.
+- `public/manifest.json`: MV3 manifest (content script + popup, `storage` permission, leasebreak.com only)
+- `src/content.ts`: content script (hides listings, adds the hide buttons)
+- `src/App.tsx`: popup UI
