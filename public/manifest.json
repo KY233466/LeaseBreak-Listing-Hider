@@ -1,14 +1,21 @@
 {
   "manifest_version": 3,
   "name": "LeaseBreak Listing Hider",
-  "version": "1.0.0",
-  "description": "Hide LeaseBreak listings you're not interested in from search results.",
+  "version": "1.1.0",
+  "description": "Hide, save and see transit commute times for LeaseBreak listings.",
   "action": {
     "default_popup": "index.html",
     "default_title": "LeaseBreak Listing Hider"
   },
-  "permissions": ["storage"],
-  "host_permissions": ["https://www.leasebreak.com/*"],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "permissions": ["storage", "declarativeNetRequest"],
+  "host_permissions": ["https://www.leasebreak.com/*", "https://api.transitous.org/*"],
+  "declarative_net_request": {
+    "rule_resources": [{ "id": "transitous_ua", "enabled": true, "path": "rules.json" }]
+  },
   "content_scripts": [
     {
       "matches": ["https://www.leasebreak.com/*"],

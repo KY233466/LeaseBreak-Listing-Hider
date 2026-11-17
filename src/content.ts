@@ -3,6 +3,7 @@
 //   (both via an injected <style>, so it also covers cards rendered later).
 // - Adds Save / Hide buttons on listing detail pages and on each search result card.
 // - Optionally auto-hides cards mentioning "Just a Room" (adds them to the hidden list).
+// - Optionally shows transit commute time (via the background worker / Transitous).
 // Must stay self-contained (no imports) so it builds into a single classic script.
 
 const HIDDEN_KEY = 'hiddenListingIds';
@@ -22,11 +23,19 @@ const lists: Record<ListKey, string[]> = { [HIDDEN_KEY]: [], [SAVED_KEY]: [] };
 let autoHideRooms = false;
 let exceptions: string[] = [];
 
+// Commute settings (must match src/background.ts).
+const COMMUTE_ENABLED_KEY = 'commuteEnabled';
+const COMMUTE_SETTING_KEYS = [COMMUTE_ENABLED_KEY, 'commuteDest', 'commuteArrival', 'commuteDay'];
+let commuteEnabled = false;
+let commuteArrival = '08:00';
+
 const toIds = (v: unknown): string[] => (Array.isArray(v) ? v.map(String) : []);
 
 function loadLists(): Promise<void> {
   return new Promise((resolve) => {
-    chrome.storage.local.get([HIDDEN_KEY, SAVED_KEY, AUTO_ROOM_KEY, EXCEPTIONS_KEY], (res) => {
+    chrome.storage.local.get([HIDDEN_KEY, SAVED_KEY, AUTO_ROOM_KEY, EXCEPTIONS_KEY, ...COMMUTE_SETTING_KEYS], (res) => {
+      commuteEnabled = res[COMMUTE_ENABLED_KEY] === true && !!res.commuteDest;
+      if (typeof res.commuteArrival === 'string') commuteArrival = res.commuteArrival;
       lists[HIDDEN_KEY] = toIds(res[HIDDEN_KEY]);
       lists[SAVED_KEY] = toIds(res[SAVED_KEY]);
       autoHideRooms = res[AUTO_ROOM_KEY] === true;
@@ -106,6 +115,16 @@ function applyStyle(): void {
 .lb-hider-save.is-on { background: #f4c430; color: #3d2a00; border-color: #e0b000; }
 .lb-hider-hide.is-on { color: #2e7d32; }
 .lb-hider-hide.is-on:hover { background: #2e7d32; color: #fff; border-color: #2e7d32; }
+.lb-commute {
+  display: inline-block; margin: 6px 0 2px; padding: 3px 8px; border-radius: 6px;
+  font: 600 12px/1.3 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: #e8f0fe; color: #174ea6; border: 1px solid #c6d7f5;
+}
+.lb-commute.is-error { background: #f5f5f5; color: #666; border-color: #ddd; font-weight: 500; }
+#lb-commute-detail {
+  position: fixed; bottom: 70px; right: 20px; z-index: 2147483647; margin: 0;
+  font-size: 14px; padding: 8px 12px; box-shadow: 0 1px 4px rgba(0,0,0,.15);
+}
 `;
 }
 
@@ -132,7 +151,6 @@ function setText(el: HTMLElement, text: string): void {
 function updateButtons(): void {
   document.querySelectorAll<HTMLButtonElement>('.lb-hider-btn').forEach((btn) => {
     const id = btn.dataset.lbId!;
-    const detail = !!btn.closest('#lb-hider-detail-actions');
     if (btn.dataset.lbKind === 'save') {
       const on = lists[SAVED_KEY].includes(id);
       btn.classList.toggle('is-on', on);
@@ -141,7 +159,7 @@ function updateButtons(): void {
     } else {
       const on = lists[HIDDEN_KEY].includes(id);
       btn.classList.toggle('is-on', on);
-      setText(btn, on ? '✓ Hidden — undo' : detail ? '✕ Not interested' : '✕ Hide');
+      setText(btn, on ? '✓ Hidden — undo' : '✕ Hide');
       btn.title = on ? `Unhide listing #${id}` : `Hide listing #${id}`;
     }
   });
@@ -170,6 +188,115 @@ function decorateCards(): void {
   });
 }
 
+// ---------- commute ----------
+
+type CommuteResult =
+  | { status: 'ok'; minutes: number; leaveBy: string; arriveAt: string; lines: string[]; transfers: number }
+  | { status: 'error'; reason: string };
+
+let commuteGen = 0; // bumps when settings change, so stale responses are dropped
+
+const fmtTime = (iso: string) =>
+  new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit' })
+    .format(new Date(iso));
+
+function fmtArrival(hhmm: string): string {
+  const [h, m] = hhmm.split(':').map(Number);
+  return `${((h + 11) % 12) + 1}:${String(m).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`;
+}
+
+function renderCommute(badge: HTMLElement, r: CommuteResult): void {
+  badge.classList.toggle('is-error', r.status !== 'ok');
+  if (r.status === 'ok') {
+    const lines = r.lines.length ? ` · ${r.lines.join('→')}` : '';
+    setText(badge, `🚇 ${r.minutes} min · leave ${fmtTime(r.leaveBy)}${lines}`);
+    badge.title = `Leave ${fmtTime(r.leaveBy)}, arrive ${fmtTime(r.arriveAt)} ` +
+      `(${r.transfers} transfer${r.transfers === 1 ? '' : 's'}). Routing: Transitous`;
+    return;
+  }
+  const msg: Record<string, string> = {
+    'no-route': `🚇 No transit route by ${fmtArrival(commuteArrival)}`,
+    'address-not-found': '🚇 Address not found',
+    'daily-limit': '🚇 Daily commute lookup limit reached',
+    network: '🚇 Commute lookup failed',
+  };
+  setText(badge, msg[r.reason] ?? '');
+  badge.hidden = !(r.reason in msg);
+}
+
+function requestCommute(badge: HTMLElement, msg: Record<string, unknown>): void {
+  if (badge.dataset.lbRequested) return;
+  badge.dataset.lbRequested = '1';
+  const gen = commuteGen;
+  setText(badge, '🚇 …');
+  chrome.runtime.sendMessage({ type: 'commute', ...msg })
+    .then((r: CommuteResult) => { if (gen === commuteGen && badge.isConnected) renderCommute(badge, r); })
+    .catch(() => { badge.hidden = true; }); // e.g. extension reloaded
+}
+
+// Only look up cards that actually scroll into view (saves API quota; hidden cards never intersect).
+const cardObserver = new IntersectionObserver((entries) => {
+  for (const e of entries) {
+    if (!e.isIntersecting) continue;
+    const badge = e.target as HTMLElement;
+    cardObserver.unobserve(badge);
+    const card = badge.closest<HTMLElement>('.search-item');
+    if (!card) continue;
+    // "Lower East Side, Manhattan" -> use only the borough; neighborhood names confuse the geocoder.
+    const street = card.querySelector('h3')?.textContent?.trim();
+    const borough = card.querySelector('.search-item-header-col .text')?.textContent?.split(',').pop()?.trim();
+    requestCommute(badge, {
+      listingId: badge.dataset.lbId,
+      address: street ? [street, borough].filter(Boolean).join(', ') : undefined,
+    });
+  }
+}, { rootMargin: '200px' });
+
+function decorateCommuteCards(): void {
+  if (!commuteEnabled) return;
+  document.querySelectorAll<HTMLElement>('.search-item[id^="listing"]').forEach((card) => {
+    const id = card.id.match(/^listing(\d+)$/)?.[1];
+    if (!id || card.querySelector('.lb-commute')) return;
+    const badge = document.createElement('div');
+    badge.className = 'lb-commute';
+    badge.dataset.lbId = id;
+    const header = card.querySelector('.search-item-header-col .header');
+    if (header) header.after(badge);
+    else (card.querySelector('.search-item-header-col') ?? card).appendChild(badge);
+    cardObserver.observe(badge);
+  });
+}
+
+function detailCoords(): { lat: number; lon: number } | undefined {
+  for (const s of Array.from(document.scripts)) {
+    const t = s.textContent ?? '';
+    const lat = t.match(/\blat\s*=\s*['"](-?\d+\.\d+)/)?.[1];
+    const lng = t.match(/\blng\s*=\s*['"](-?\d+\.\d+)/)?.[1];
+    if (lat && lng) return { lat: Number(lat), lon: Number(lng) };
+  }
+  return undefined;
+}
+
+function renderDetailCommute(): void {
+  const id = location.pathname.match(DETAIL_RE)?.[1];
+  if (!id || !commuteEnabled || document.getElementById('lb-commute-detail')) return;
+  const badge = document.createElement('div');
+  badge.id = 'lb-commute-detail';
+  badge.className = 'lb-commute';
+  document.body.appendChild(badge);
+  const h1 = document.querySelector('h1')?.textContent?.trim();
+  requestCommute(badge, {
+    listingId: id,
+    coords: detailCoords(),
+    address: h1 || undefined,
+  });
+}
+
+function resetCommute(): void {
+  commuteGen++;
+  document.querySelectorAll('.lb-commute').forEach((b) => { cardObserver.unobserve(b); b.remove(); });
+}
+
 function refreshUi(): void {
   applyStyle();
   if (!document.body) return;
@@ -177,6 +304,8 @@ function refreshUi(): void {
   decorateCards();
   updateButtons();
   autoHideScan();
+  decorateCommuteCards();
+  renderDetailCommute();
 }
 
 async function init(): Promise<void> {
@@ -191,6 +320,14 @@ async function init(): Promise<void> {
       changed = true;
     }
     if (EXCEPTIONS_KEY in changes) exceptions = toIds(changes[EXCEPTIONS_KEY].newValue);
+    if (COMMUTE_SETTING_KEYS.some((k) => k in changes)) {
+      chrome.storage.local.get(COMMUTE_SETTING_KEYS, (res) => {
+        commuteEnabled = res[COMMUTE_ENABLED_KEY] === true && !!res.commuteDest;
+        if (typeof res.commuteArrival === 'string') commuteArrival = res.commuteArrival;
+        resetCommute();
+        refreshUi();
+      });
+    }
     for (const key of [HIDDEN_KEY, SAVED_KEY] as const) {
       if (key in changes) {
         lists[key] = toIds(changes[key].newValue);
@@ -213,6 +350,7 @@ async function init(): Promise<void> {
         decorateCards();
         updateButtons();
         autoHideScan();
+        decorateCommuteCards();
       });
     }).observe(document.body, { childList: true, subtree: true });
   };

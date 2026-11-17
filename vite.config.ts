@@ -10,6 +10,10 @@ export default defineConfig({
         {
           src: 'public/manifest.json',
           dest: '.',
+        },
+        {
+          src: 'public/rules.json',
+          dest: '.',
         }
       ],
     }),
@@ -20,10 +24,13 @@ export default defineConfig({
       input: {
         main: './index.html',
         content: './src/content.ts',
+        background: './src/background.ts',
       },
       output: {
         entryFileNames: (chunkInfo) => {
-          return chunkInfo.name === 'content' ? 'content.js' : 'assets/[name]-[hash].js';
+          if (chunkInfo.name === 'content') return 'content.js';
+          if (chunkInfo.name === 'background') return 'background.js';
+          return 'assets/[name]-[hash].js';
         },
       },
     },

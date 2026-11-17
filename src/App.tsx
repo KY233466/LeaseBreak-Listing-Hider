@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import './App.css'
+import { CommuteSettings } from './Commute'
 
 const HIDDEN_KEY = 'hiddenListingIds'
 const SAVED_KEY = 'savedListingIds'
@@ -102,6 +103,8 @@ function App() {
         />
         <span>Auto-hide &ldquo;Just a Room&rdquo; listings</span>
       </label>
+
+      <CommuteSettings />
 
       {currentId && (
         <section className="current">

@@ -33,3 +33,15 @@ button.save.on { background: #f4c430; color: #3d2a00; border-color: #e0b000; }
 ul { max-height: 160px; }
 .toggle { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; cursor: pointer; }
 .toggle input { flex: none; width: 16px; height: 16px; margin: 0; }
+.commute { margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px solid #eee; }
+.commute h2 { margin-top: 0; }
+.commute .dest { margin: 0 0 8px; }
+.commute .matches { max-height: none; margin-top: 6px; }
+.commute .matches li { border: none; padding: 2px 0; }
+button.pick { color: #1565c0; text-align: left; }
+.when { display: flex; align-items: center; gap: 6px; margin-top: 8px; }
+.when input, .when select { flex: none; font: inherit; padding: 3px 6px; border: 1px solid #bbb; border-radius: 6px; }
+.attribution { margin: 8px 0 0; font-size: 11px; color: #888; }
+button:disabled { opacity: .6; cursor: default; }
+.when span, .current button { white-space: nowrap; }
+.current > span { min-width: 0; }
