@@ -282,6 +282,8 @@ if (isServiceWorker) {
   // disconnected copy of the content script (it no longer sees popup changes).
   // Load the new copy into them; it cleans up the old copy's buttons.
   chrome.runtime.onInstalled.addListener(async () => {
+    // Settings from the removed "auto-hide Just a Room" feature.
+    local.remove(['autoHideJustARoom', 'autoHideExceptions']).catch(() => {});
     const tabs = await chrome.tabs.query({ url: 'https://www.leasebreak.com/*' });
     for (const tab of tabs) {
       if (tab.id === undefined) continue;

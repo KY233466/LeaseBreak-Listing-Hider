@@ -9,9 +9,8 @@ A Chrome extension (only active on `https://www.leasebreak.com`) that hides list
 - Ways to hide a listing:
   - **Listing page:** Save and Hide sit on the title line, and the commute time. If the page doesn't have that title block, they float in the bottom-right corner instead.
   - **Search results:** click "✕ Hide" in the top-right corner of a card.
-  - **Popup:** click the extension icon, then paste an ID or URL, or click "Hide" for the listing you're on.
+  - **Popup:** on a listing page, click the extension icon and use Save or Hide for that listing.
 - **Save:** each card and listing page also has a "☆ Save" button. Saved listings get a soft yellow background in search results. Click again to unsave.
-- **Auto-hide "Just a Room":** a toggle in the popup. When on, any search result whose text contains "Just a Room" is hidden and added to the hidden list automatically. Saved listings are skipped, and a listing you remove from the hidden list in the popup won't be auto-hidden again.
 - **Commute time:** in the popup's Commute section, find your destination (an address or a place like "Grand Central Terminal"), then set an arrive-by time (default 8:00 AM) and a day (default Tuesday). Each search card and listing page then shows a badge like "🚇 21 min · leave 7:37 AM · J→4": the subway/bus trip that lets you leave latest and still arrive on time.
   - Listing pages use the exact location on the page. Search cards geocode the card's street address and borough, and show "Address not found" rather than guess.
   - The ↗ icon at the right of each badge opens Google Maps in a new tab with transit directions from the listing to your destination, set to **Arrive by** your time and day, so you can double-check. This uses an undocumented Google Maps link format; if Google stops honoring it, the link still opens the right route at Google's default time.

@@ -2,26 +2,18 @@
 // - Hides search results whose id is in the hidden list, and highlights saved ones
 //   (both via an injected <style>, so it also covers cards rendered later).
 // - Adds Save / Hide buttons on listing detail pages and on each search result card.
-// - Optionally auto-hides cards mentioning "Just a Room" (adds them to the hidden list).
 // - Optionally shows transit commute time (via the background worker / Transitous).
 // Must stay self-contained (no imports) so it builds into a single classic script.
 
 const HIDDEN_KEY = 'hiddenListingIds';
 const SAVED_KEY = 'savedListingIds';
 type ListKey = typeof HIDDEN_KEY | typeof SAVED_KEY;
-// Setting: auto-hide "Just a Room" listings. Exceptions = ids the user manually
-// unhid, so auto-hide doesn't immediately re-hide them.
-const AUTO_ROOM_KEY = 'autoHideJustARoom';
-const EXCEPTIONS_KEY = 'autoHideExceptions';
-const ROOM_RE = /just a room/i;
 
 const STYLE_ID = 'lb-hider-style';
 const DETAIL_RE = /details\/(\d+)/i;
 const SAVED_BG = '#fff6c2';
 
 const lists: Record<ListKey, string[]> = { [HIDDEN_KEY]: [], [SAVED_KEY]: [] };
-let autoHideRooms = false;
-let exceptions: string[] = [];
 
 // Commute settings (must match src/background.ts).
 const COMMUTE_ENABLED_KEY = 'commuteEnabled';
@@ -33,13 +25,11 @@ const toIds = (v: unknown): string[] => (Array.isArray(v) ? v.map(String) : []);
 
 function loadLists(): Promise<void> {
   return new Promise((resolve) => {
-    chrome.storage.local.get([HIDDEN_KEY, SAVED_KEY, AUTO_ROOM_KEY, EXCEPTIONS_KEY, ...COMMUTE_SETTING_KEYS], (res) => {
+    chrome.storage.local.get([HIDDEN_KEY, SAVED_KEY, ...COMMUTE_SETTING_KEYS], (res) => {
       commuteEnabled = res[COMMUTE_ENABLED_KEY] === true && !!res.commuteDest;
       if (typeof res.commuteArrival === 'string') commuteArrival = res.commuteArrival;
       lists[HIDDEN_KEY] = toIds(res[HIDDEN_KEY]);
       lists[SAVED_KEY] = toIds(res[SAVED_KEY]);
-      autoHideRooms = res[AUTO_ROOM_KEY] === true;
-      exceptions = toIds(res[EXCEPTIONS_KEY]);
       resolve();
     });
   });
@@ -47,38 +37,11 @@ function loadLists(): Promise<void> {
 
 function toggleId(key: ListKey, id: string): Promise<void> {
   return new Promise((resolve) => {
-    chrome.storage.local.get([key, EXCEPTIONS_KEY], (res) => {
+    chrome.storage.local.get(key, (res) => {
       const ids = toIds(res[key]);
-      const removing = ids.includes(id);
-      const update: Record<string, string[]> = {
-        [key]: removing ? ids.filter((x) => x !== id) : [...ids, id],
-      };
-      // Manually unhiding: remember it so auto-hide leaves it alone.
-      const exc = toIds(res[EXCEPTIONS_KEY]);
-      if (key === HIDDEN_KEY && removing && !exc.includes(id)) update[EXCEPTIONS_KEY] = [...exc, id];
-      chrome.storage.local.set(update, () => resolve());
+      const next = ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id];
+      chrome.storage.local.set({ [key]: next }, () => resolve());
     });
-  });
-}
-
-const autoHidePending = new Set<string>();
-
-/** If enabled, add every visible "Just a Room" card to the hidden list (one write). */
-function autoHideScan(): void {
-  if (!autoHideRooms) return;
-  const found: string[] = [];
-  document.querySelectorAll<HTMLElement>('.search-item[id^="listing"]').forEach((card) => {
-    const id = card.id.match(/^listing(\d+)$/)?.[1];
-    if (!id || autoHidePending.has(id)) return;
-    if (lists[HIDDEN_KEY].includes(id) || lists[SAVED_KEY].includes(id) || exceptions.includes(id)) return;
-    if (ROOM_RE.test(card.textContent ?? '')) found.push(id);
-  });
-  if (!found.length) return;
-  found.forEach((id) => autoHidePending.add(id));
-  chrome.storage.local.get(HIDDEN_KEY, (res) => {
-    const ids = toIds(res[HIDDEN_KEY]);
-    const next = [...ids, ...found.filter((id) => !ids.includes(id))];
-    chrome.storage.local.set({ [HIDDEN_KEY]: next }, () => found.forEach((id) => autoHidePending.delete(id)));
   });
 }
 
@@ -417,7 +380,6 @@ function refreshUi(): void {
   renderDetailButtons();
   decorateCards();
   updateButtons();
-  autoHideScan();
   decorateCommuteCards();
   renderDetailCommute();
 }
@@ -443,11 +405,6 @@ async function init(): Promise<void> {
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== 'local') return;
     let changed = false;
-    if (AUTO_ROOM_KEY in changes) {
-      autoHideRooms = changes[AUTO_ROOM_KEY].newValue === true;
-      changed = true;
-    }
-    if (EXCEPTIONS_KEY in changes) exceptions = toIds(changes[EXCEPTIONS_KEY].newValue);
     if (COMMUTE_SETTING_KEYS.some((k) => k in changes)) {
       chrome.storage.local.get(COMMUTE_SETTING_KEYS, (res) => {
         commuteEnabled = res[COMMUTE_ENABLED_KEY] === true && !!res.commuteDest;
@@ -480,7 +437,6 @@ async function init(): Promise<void> {
         if (!document.getElementById(STYLE_ID)) applyStyle();
         decorateCards();
         updateButtons();
-        autoHideScan();
         decorateCommuteCards();
         renderDetailButtons(); // no-ops once placed; moves them inline if the title renders late
         renderDetailCommute();

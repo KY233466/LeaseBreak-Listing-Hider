@@ -5,20 +5,10 @@ import { CommuteSettings } from './Commute'
 const HIDDEN_KEY = 'hiddenListingIds'
 const SAVED_KEY = 'savedListingIds'
 type ListKey = typeof HIDDEN_KEY | typeof SAVED_KEY
-const AUTO_ROOM_KEY = 'autoHideJustARoom'
-const EXCEPTIONS_KEY = 'autoHideExceptions'
 
 const DETAIL_RE = /details\/(\d+)/i
 const toIds = (v: unknown): string[] => (Array.isArray(v) ? v.map(String) : [])
 const listingUrl = (id: string) => `https://www.leasebreak.com/short-term-rental-details/${id}/`
-
-/** Accepts a bare id ("410557") or any LeaseBreak details URL. */
-function parseId(input: string): string | null {
-  const s = input.trim()
-  if (/^\d+$/.test(s)) return s
-  const m = s.match(DETAIL_RE) ?? s.match(/listing(\d+)/)
-  return m ? m[1] : null
-}
 
 function IdList({ ids, onRemove, empty }: { ids: string[]; onRemove: (id: string) => void; empty: string }) {
   if (ids.length === 0) return <p className="empty">{empty}</p>
@@ -37,22 +27,17 @@ function IdList({ ids, onRemove, empty }: { ids: string[]; onRemove: (id: string
 function App() {
   const [hidden, setHidden] = useState<string[]>([])
   const [saved, setSaved] = useState<string[]>([])
-  const [autoRoom, setAutoRoom] = useState(false)
   const [currentId, setCurrentId] = useState<string | null>(null)
-  const [input, setInput] = useState('')
-  const [error, setError] = useState('')
 
   useEffect(() => {
-    chrome.storage.local.get([HIDDEN_KEY, SAVED_KEY, AUTO_ROOM_KEY], (res) => {
+    chrome.storage.local.get([HIDDEN_KEY, SAVED_KEY], (res) => {
       setHidden(toIds(res[HIDDEN_KEY]))
       setSaved(toIds(res[SAVED_KEY]))
-      setAutoRoom(res[AUTO_ROOM_KEY] === true)
     })
     const onChange = (changes: { [k: string]: chrome.storage.StorageChange }, area: string) => {
       if (area !== 'local') return
       if (HIDDEN_KEY in changes) setHidden(toIds(changes[HIDDEN_KEY].newValue))
       if (SAVED_KEY in changes) setSaved(toIds(changes[SAVED_KEY].newValue))
-      if (AUTO_ROOM_KEY in changes) setAutoRoom(changes[AUTO_ROOM_KEY].newValue === true)
     }
     chrome.storage.onChanged.addListener(onChange)
 
@@ -74,36 +59,15 @@ function App() {
     if (!ids.includes(id)) await chrome.storage.local.set({ [key]: [...ids, id] })
   }
   const remove = async (key: ListKey, id: string) => {
-    const res = await chrome.storage.local.get([key, EXCEPTIONS_KEY])
-    const update: Record<string, string[]> = { [key]: toIds(res[key]).filter((x) => x !== id) }
-    // Manually unhiding: remember it so auto-hide doesn't re-hide it.
-    const exc = toIds(res[EXCEPTIONS_KEY])
-    if (key === HIDDEN_KEY && !exc.includes(id)) update[EXCEPTIONS_KEY] = [...exc, id]
-    await chrome.storage.local.set(update)
+    const ids = toIds((await chrome.storage.local.get(key))[key])
+    await chrome.storage.local.set({ [key]: ids.filter((x) => x !== id) })
   }
   const toggle = (key: ListKey, id: string) =>
     listFor(key).includes(id) ? remove(key, id) : add(key, id)
 
-  const submitTo = (key: ListKey) => {
-    const id = parseId(input)
-    if (!id) { setError('Enter a listing ID or a LeaseBreak listing URL.'); return }
-    setError('')
-    add(key, id)
-    setInput('')
-  }
-
   return (
     <main>
       <h1>LeaseBreak Listing Hider</h1>
-
-      <label className="toggle">
-        <input
-          type="checkbox"
-          checked={autoRoom}
-          onChange={(e) => chrome.storage.local.set({ [AUTO_ROOM_KEY]: e.target.checked })}
-        />
-        <span>Auto-hide &ldquo;Just a Room&rdquo; listings</span>
-      </label>
 
       <CommuteSettings />
 
@@ -126,18 +90,6 @@ function App() {
           </div>
         </section>
       )}
-
-      <form onSubmit={(e) => { e.preventDefault(); submitTo(HIDDEN_KEY) }}>
-        <input
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          placeholder="Listing ID or URL"
-          aria-label="Listing ID or URL"
-        />
-        <button type="button" className="save" onClick={() => submitTo(SAVED_KEY)}>Save</button>
-        <button type="submit" className="danger">Hide</button>
-      </form>
-      {error && <p className="error">{error}</p>}
 
       <h2>Saved ({saved.length})</h2>
       <IdList ids={saved} onRemove={(id) => remove(SAVED_KEY, id)} empty="None yet." />
