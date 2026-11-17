@@ -103,9 +103,9 @@ function applyStyle(): void {
 #lb-hider-detail-actions { position: fixed; bottom: 20px; right: 20px; z-index: 2147483647; }
 #lb-hider-detail-actions:not(.is-inline) .lb-hider-btn { font-size: 14px; padding: 10px 16px; }
 .lb-title-row { display: flex !important; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
-#lb-hider-detail-actions.is-inline { position: static; flex: none; }
+#lb-hider-detail-actions.is-inline { position: static; z-index: auto; flex: none; }
 .lb-commute.is-inline { margin: 0; flex: none; }
-#lb-commute-detail.is-inline { position: static; flex: none; margin: 0; box-shadow: none; font-size: 13px; padding: 4px 10px; }
+#lb-commute-detail.is-inline { position: static; z-index: auto; flex: none; margin: 0; box-shadow: none; font-size: 13px; padding: 4px 10px; }
 .lb-hider-btn {
   font: 600 12px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   border: 1px solid currentColor; background: #fff;
@@ -422,7 +422,21 @@ function refreshUi(): void {
   renderDetailCommute();
 }
 
+/** False once the extension is reloaded/updated: this copy of the script is cut off from it. */
+const extensionAlive = () => { try { return !!chrome.runtime?.id; } catch { return false; } };
+
+/** Remove buttons/badges left behind by a previous (now disconnected) copy of this script. */
+function removeLeftovers(): void {
+  document.querySelectorAll('#lb-hider-detail-actions, #lb-commute-detail, .lb-hider-card-actions, .lb-commute')
+    .forEach((el) => el.remove());
+}
+
 async function init(): Promise<void> {
+  // Re-injected after an extension reload while a live copy is still running (rare race): do nothing.
+  const w = window as unknown as { __lbHiderAlive?: () => boolean };
+  if (w.__lbHiderAlive?.()) return;
+  w.__lbHiderAlive = extensionAlive;
+
   await loadLists();
   applyStyle();
 
@@ -452,11 +466,13 @@ async function init(): Promise<void> {
   });
 
   const onReady = () => {
+    removeLeftovers();
     refreshUi();
     // Search results may be loaded/replaced dynamically.
     let pending = false;
-    new MutationObserver(() => {
+    const observer = new MutationObserver(() => {
       if (pending) return;
+      if (!extensionAlive()) { observer.disconnect(); return; } // extension reloaded: stop, the new copy takes over
       pending = true;
       // setTimeout, not requestAnimationFrame: rAF is paused in background tabs.
       setTimeout(() => {
@@ -470,7 +486,8 @@ async function init(): Promise<void> {
         renderDetailCommute();
         updateButtons();
       }, 50);
-    }).observe(document.body, { childList: true, subtree: true });
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
   };
 
   if (document.readyState === 'loading') {

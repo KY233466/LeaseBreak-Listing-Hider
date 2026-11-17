@@ -38,24 +38,21 @@ function App() {
   const [hidden, setHidden] = useState<string[]>([])
   const [saved, setSaved] = useState<string[]>([])
   const [autoRoom, setAutoRoom] = useState(false)
-  const [exceptions, setExceptions] = useState<string[]>([])
   const [currentId, setCurrentId] = useState<string | null>(null)
   const [input, setInput] = useState('')
   const [error, setError] = useState('')
 
   useEffect(() => {
-    chrome.storage.local.get([HIDDEN_KEY, SAVED_KEY, AUTO_ROOM_KEY, EXCEPTIONS_KEY], (res) => {
+    chrome.storage.local.get([HIDDEN_KEY, SAVED_KEY, AUTO_ROOM_KEY], (res) => {
       setHidden(toIds(res[HIDDEN_KEY]))
       setSaved(toIds(res[SAVED_KEY]))
       setAutoRoom(res[AUTO_ROOM_KEY] === true)
-      setExceptions(toIds(res[EXCEPTIONS_KEY]))
     })
     const onChange = (changes: { [k: string]: chrome.storage.StorageChange }, area: string) => {
       if (area !== 'local') return
       if (HIDDEN_KEY in changes) setHidden(toIds(changes[HIDDEN_KEY].newValue))
       if (SAVED_KEY in changes) setSaved(toIds(changes[SAVED_KEY].newValue))
       if (AUTO_ROOM_KEY in changes) setAutoRoom(changes[AUTO_ROOM_KEY].newValue === true)
-      if (EXCEPTIONS_KEY in changes) setExceptions(toIds(changes[EXCEPTIONS_KEY].newValue))
     }
     chrome.storage.onChanged.addListener(onChange)
 
@@ -70,15 +67,19 @@ function App() {
   }, [])
 
   const listFor = (key: ListKey) => (key === HIDDEN_KEY ? hidden : saved)
-  const add = (key: ListKey, id: string) => {
-    const ids = listFor(key)
-    if (!ids.includes(id)) chrome.storage.local.set({ [key]: [...ids, id] })
+  // Always read the latest lists from storage before writing, so a click made before the
+  // popup finished loading (or while a page changed the list) can't overwrite them.
+  const add = async (key: ListKey, id: string) => {
+    const ids = toIds((await chrome.storage.local.get(key))[key])
+    if (!ids.includes(id)) await chrome.storage.local.set({ [key]: [...ids, id] })
   }
-  const remove = (key: ListKey, id: string) => {
-    const update: Record<string, string[]> = { [key]: listFor(key).filter((x) => x !== id) }
+  const remove = async (key: ListKey, id: string) => {
+    const res = await chrome.storage.local.get([key, EXCEPTIONS_KEY])
+    const update: Record<string, string[]> = { [key]: toIds(res[key]).filter((x) => x !== id) }
     // Manually unhiding: remember it so auto-hide doesn't re-hide it.
-    if (key === HIDDEN_KEY && !exceptions.includes(id)) update[EXCEPTIONS_KEY] = [...exceptions, id]
-    chrome.storage.local.set(update)
+    const exc = toIds(res[EXCEPTIONS_KEY])
+    if (key === HIDDEN_KEY && !exc.includes(id)) update[EXCEPTIONS_KEY] = [...exc, id]
+    await chrome.storage.local.set(update)
   }
   const toggle = (key: ListKey, id: string) =>
     listFor(key).includes(id) ? remove(key, id) : add(key, id)

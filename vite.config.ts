@@ -27,6 +27,10 @@ export default defineConfig({
         background: './src/background.ts',
       },
       output: {
+        // The content script can be injected twice into a tab (manifest + re-injection after an
+        // extension reload). Wrap it so its top-level consts don't collide.
+        banner: (chunk) => (chunk.name === 'content' ? '(() => {' : ''),
+        footer: (chunk) => (chunk.name === 'content' ? '})();' : ''),
         entryFileNames: (chunkInfo) => {
           if (chunkInfo.name === 'content') return 'content.js';
           if (chunkInfo.name === 'background') return 'background.js';

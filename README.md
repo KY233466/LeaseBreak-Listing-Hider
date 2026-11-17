@@ -46,3 +46,5 @@ After making changes, run `npm run build` again and click the reload icon on the
 - `src/background.ts`: service worker (Transitous geocoding + routing, cache, rate limit)
 - `src/App.tsx`, `src/Commute.tsx`: popup UI
 - `public/rules.json`: sets the User-Agent on Transitous requests
+
+The `scripting` permission lets the extension reload its page script into LeaseBreak tabs that are already open after an install or update. Without it, those tabs keep a disconnected copy that ignores changes made in the popup.

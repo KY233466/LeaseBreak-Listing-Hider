@@ -11,15 +11,32 @@
     "service_worker": "background.js",
     "type": "module"
   },
-  "permissions": ["storage", "declarativeNetRequest"],
-  "host_permissions": ["https://www.leasebreak.com/*", "https://api.transitous.org/*"],
+  "permissions": [
+    "storage",
+    "declarativeNetRequest",
+    "scripting"
+  ],
+  "host_permissions": [
+    "https://www.leasebreak.com/*",
+    "https://api.transitous.org/*"
+  ],
   "declarative_net_request": {
-    "rule_resources": [{ "id": "transitous_ua", "enabled": true, "path": "rules.json" }]
+    "rule_resources": [
+      {
+        "id": "transitous_ua",
+        "enabled": true,
+        "path": "rules.json"
+      }
+    ]
   },
   "content_scripts": [
     {
-      "matches": ["https://www.leasebreak.com/*"],
-      "js": ["content.js"],
+      "matches": [
+        "https://www.leasebreak.com/*"
+      ],
+      "js": [
+        "content.js"
+      ],
       "run_at": "document_start"
     }
   ]

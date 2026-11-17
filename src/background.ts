@@ -278,6 +278,17 @@ if (isServiceWorker) {
     return result;
   }
 
+  // After an install/update/reload, tabs that were already open still run the old,
+  // disconnected copy of the content script (it no longer sees popup changes).
+  // Load the new copy into them; it cleans up the old copy's buttons.
+  chrome.runtime.onInstalled.addListener(async () => {
+    const tabs = await chrome.tabs.query({ url: 'https://www.leasebreak.com/*' });
+    for (const tab of tabs) {
+      if (tab.id === undefined) continue;
+      chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['content.js'] }).catch(() => {});
+    }
+  });
+
   chrome.runtime.onMessage.addListener((msg: BgMessage, _sender, sendResponse) => {
     if (msg?.type === 'commute') {
       const k = JSON.stringify(msg);
