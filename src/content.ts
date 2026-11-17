@@ -1,19 +1,18 @@
 // Content script for https://www.leasebreak.com/*
-// - Hides search results whose id is in the hidden list, and highlights saved ones
-//   (both via an injected <style>, so it also covers cards rendered later).
-// - Adds Save / Hide buttons on listing detail pages and on each search result card.
+// - Hides search results whose id is in the hidden list (via an injected <style>, so it also
+//   covers cards rendered later), and highlights cards the user saved with LeaseBreak's own Save.
+// - Adds a Hide button on listing detail pages, search result cards and map-view items.
 // - Optionally shows transit commute time (via the background worker / Transitous).
 // Must stay self-contained (no imports) so it builds into a single classic script.
 
 const HIDDEN_KEY = 'hiddenListingIds';
-const SAVED_KEY = 'savedListingIds';
-type ListKey = typeof HIDDEN_KEY | typeof SAVED_KEY;
+type ListKey = typeof HIDDEN_KEY;
 
 const STYLE_ID = 'lb-hider-style';
 const DETAIL_RE = /details\/(\d+)/i;
 const SAVED_BG = '#fff6c2';
 
-const lists: Record<ListKey, string[]> = { [HIDDEN_KEY]: [], [SAVED_KEY]: [] };
+const lists: Record<ListKey, string[]> = { [HIDDEN_KEY]: [] };
 
 // Commute settings (must match src/background.ts).
 const COMMUTE_ENABLED_KEY = 'commuteEnabled';
@@ -25,11 +24,10 @@ const toIds = (v: unknown): string[] => (Array.isArray(v) ? v.map(String) : []);
 
 function loadLists(): Promise<void> {
   return new Promise((resolve) => {
-    chrome.storage.local.get([HIDDEN_KEY, SAVED_KEY, ...COMMUTE_SETTING_KEYS], (res) => {
+    chrome.storage.local.get([HIDDEN_KEY, ...COMMUTE_SETTING_KEYS], (res) => {
       commuteEnabled = res[COMMUTE_ENABLED_KEY] === true && !!res.commuteDest;
       if (typeof res.commuteArrival === 'string') commuteArrival = res.commuteArrival;
       lists[HIDDEN_KEY] = toIds(res[HIDDEN_KEY]);
-      lists[SAVED_KEY] = toIds(res[SAVED_KEY]);
       resolve();
     });
   });
@@ -60,11 +58,11 @@ function applyStyle(): void {
     (document.head || document.documentElement).appendChild(style);
   }
   const hidden = selectorsFor(lists[HIDDEN_KEY]);
-  const saved = selectorsFor(lists[SAVED_KEY]);
   style.textContent =
     (hidden.length ? `${hidden.join(',\n')} { display: none !important; }\n` : '') +
-    (saved.length ? `${saved.join(',\n')} { background-color: ${SAVED_BG} !important; }\n` : '') +
     `
+/* Listings saved with LeaseBreak's own Save button. */
+.search-item.lb-site-saved { background-color: ${SAVED_BG} !important; }
 .lb-hider-actions { display: flex; gap: 6px; }
 .lb-hider-card-actions { position: absolute; top: 8px; right: 8px; z-index: 50; }
 #lb-hider-detail-actions { position: fixed; bottom: 20px; right: 20px; z-index: 2147483647; }
@@ -85,9 +83,6 @@ function applyStyle(): void {
 }
 .lb-hider-hide { color: #c62828; }
 .lb-hider-hide:hover { background: #c62828; color: #fff; border-color: #c62828; }
-.lb-hider-save { color: #9a6b00; }
-.lb-hider-save:hover { background: #f4c430; color: #3d2a00; border-color: #f4c430; }
-.lb-hider-save.is-on { background: #f4c430; color: #3d2a00; border-color: #e0b000; }
 .lb-hider-hide.is-on { color: #2e7d32; }
 .lb-hider-hide.is-on:hover { background: #2e7d32; color: #fff; border-color: #2e7d32; }
 .lb-commute {
@@ -106,16 +101,15 @@ function applyStyle(): void {
 `;
 }
 
-function makeButton(kind: 'save' | 'hide', id: string): HTMLButtonElement {
+function makeButton(id: string): HTMLButtonElement {
   const btn = document.createElement('button');
   btn.type = 'button';
-  btn.className = `lb-hider-btn lb-hider-${kind}`;
+  btn.className = 'lb-hider-btn lb-hider-hide';
   btn.dataset.lbId = id;
-  btn.dataset.lbKind = kind;
   btn.addEventListener('click', (e) => {
     e.preventDefault();
     e.stopPropagation();
-    toggleId(kind === 'save' ? SAVED_KEY : HIDDEN_KEY, id);
+    toggleId(HIDDEN_KEY, id);
   });
   return btn;
 }
@@ -129,17 +123,10 @@ function setText(el: HTMLElement, text: string): void {
 function updateButtons(): void {
   document.querySelectorAll<HTMLButtonElement>('.lb-hider-btn').forEach((btn) => {
     const id = btn.dataset.lbId!;
-    if (btn.dataset.lbKind === 'save') {
-      const on = lists[SAVED_KEY].includes(id);
-      btn.classList.toggle('is-on', on);
-      setText(btn, on ? '★ Saved' : '☆ Save');
-      btn.title = on ? `Unsave listing #${id}` : `Save listing #${id}`;
-    } else {
-      const on = lists[HIDDEN_KEY].includes(id);
-      btn.classList.toggle('is-on', on);
-      setText(btn, on ? '✓ Hidden — undo' : '✕ Hide');
-      btn.title = on ? `Unhide listing #${id}` : `Hide listing #${id}`;
-    }
+    const on = lists[HIDDEN_KEY].includes(id);
+    btn.classList.toggle('is-on', on);
+    setText(btn, on ? '✓ Hidden — undo' : '✕ Hide');
+    btn.title = on ? `Unhide listing #${id}` : `Hide listing #${id}`;
   });
 }
 
@@ -178,7 +165,7 @@ function renderDetailButtons(): void {
     wrap = document.createElement('div');
     wrap.id = 'lb-hider-detail-actions';
     wrap.className = 'lb-hider-actions';
-    wrap.append(makeButton('save', m[1]), makeButton('hide', m[1]));
+    wrap.append(makeButton(m[1]));
   }
   placeDetailEl(wrap, detailTitle()?.title);
 }
@@ -190,8 +177,24 @@ function decorateCards(): void {
     if (getComputedStyle(card).position === 'static') card.style.position = 'relative';
     const wrap = document.createElement('div');
     wrap.className = 'lb-hider-actions lb-hider-card-actions';
-    wrap.append(makeButton('save', m[1]), makeButton('hide', m[1]));
+    wrap.append(makeButton(m[1]));
     card.appendChild(wrap);
+  });
+}
+
+/**
+ * Mark search cards that the user saved with LeaseBreak's own Save button. Checked per card
+ * in JS (not a CSS :has rule) because the site's markup can't be relied on: only a *visible*
+ * button reading "Saved" inside the card itself counts, not a hidden one or one in a nested card.
+ */
+function markSiteSaved(): void {
+  document.querySelectorAll<HTMLElement>('.search-item[id^="listing"]').forEach((card) => {
+    const saved = Array.from(card.querySelectorAll<HTMLElement>('.search-item-save-block button')).some((b) =>
+      b.closest('.search-item[id^="listing"]') === card &&
+      b.textContent?.trim().toLowerCase() === 'saved' &&
+      getComputedStyle(b).display !== 'none' && getComputedStyle(b).visibility !== 'hidden' &&
+      !b.closest('[style*="display: none"], [style*="display:none"]'));
+    if (card.classList.contains('lb-site-saved') !== saved) card.classList.toggle('lb-site-saved', saved);
   });
 }
 
@@ -200,7 +203,7 @@ function decorateCards(): void {
 const mapListingId = (item: Element) =>
   item.querySelector<HTMLAnchorElement>('.map-listing-info-address a')?.getAttribute('href')?.match(DETAIL_RE)?.[1];
 
-/** Save/Hide on the address line ("168 India Street"), pushed right. */
+/** Hide on the address line ("168 India Street"), pushed right. */
 function decorateMapListings(): void {
   document.querySelectorAll<HTMLElement>('.map-listing').forEach((item) => {
     const id = mapListingId(item);
@@ -212,7 +215,7 @@ function decorateMapListings(): void {
     const wrap = document.createElement('div');
     wrap.className = 'lb-hider-actions lb-hider-map-actions';
     wrap.dataset.lbId = id;
-    wrap.append(makeButton('save', id), makeButton('hide', id));
+    wrap.append(makeButton(id));
     row.classList.add('lb-title-row');
     row.appendChild(wrap);
   });
@@ -440,6 +443,7 @@ function refreshUi(): void {
   renderDetailButtons();
   decorateCards();
   decorateMapListings();
+  markSiteSaved();
   updateButtons();
   decorateCommuteCards();
   renderDetailCommute();
@@ -474,7 +478,7 @@ async function init(): Promise<void> {
         refreshUi();
       });
     }
-    for (const key of [HIDDEN_KEY, SAVED_KEY] as const) {
+    for (const key of [HIDDEN_KEY] as const) {
       if (key in changes) {
         lists[key] = toIds(changes[key].newValue);
         changed = true;
@@ -498,6 +502,7 @@ async function init(): Promise<void> {
         if (!document.getElementById(STYLE_ID)) applyStyle();
         decorateCards();
         decorateMapListings();
+        markSiteSaved();
         updateButtons();
         decorateCommuteCards();
         renderDetailButtons(); // no-ops once placed; moves them inline if the title renders late
@@ -505,7 +510,11 @@ async function init(): Promise<void> {
         updateButtons();
       }, 50);
     });
-    observer.observe(document.body, { childList: true, subtree: true });
+    // Also watch text/class/style changes: clicking the site's Save may just relabel the button.
+    observer.observe(document.body, {
+      childList: true, subtree: true, characterData: true,
+      attributes: true, attributeFilter: ['class', 'style', 'disabled'],
+    });
   };
 
   if (document.readyState === 'loading') {

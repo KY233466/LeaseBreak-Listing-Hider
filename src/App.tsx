@@ -3,9 +3,6 @@ import './App.css'
 import { CommuteSettings } from './Commute'
 
 const HIDDEN_KEY = 'hiddenListingIds'
-const SAVED_KEY = 'savedListingIds'
-type ListKey = typeof HIDDEN_KEY | typeof SAVED_KEY
-type Tab = 'saved' | 'hidden'
 
 const DETAIL_RE = /details\/(\d+)/i
 const toIds = (v: unknown): string[] => (Array.isArray(v) ? v.map(String) : [])
@@ -43,19 +40,13 @@ function IdList({ ids, onRemove, empty }: { ids: string[]; onRemove: (id: string
 
 function App() {
   const [hidden, setHidden] = useState<string[]>([])
-  const [saved, setSaved] = useState<string[]>([])
   const [currentId, setCurrentId] = useState<string | null>(null)
-  const [tab, setTab] = useState<Tab>('saved')
 
   useEffect(() => {
-    chrome.storage.local.get([HIDDEN_KEY, SAVED_KEY], (res) => {
-      setHidden(toIds(res[HIDDEN_KEY]))
-      setSaved(toIds(res[SAVED_KEY]))
-    })
+    chrome.storage.local.get(HIDDEN_KEY, (res) => setHidden(toIds(res[HIDDEN_KEY])))
     const onChange = (changes: { [k: string]: chrome.storage.StorageChange }, area: string) => {
       if (area !== 'local') return
       if (HIDDEN_KEY in changes) setHidden(toIds(changes[HIDDEN_KEY].newValue))
-      if (SAVED_KEY in changes) setSaved(toIds(changes[SAVED_KEY].newValue))
     }
     chrome.storage.onChanged.addListener(onChange)
 
@@ -69,21 +60,18 @@ function App() {
     return () => chrome.storage.onChanged.removeListener(onChange)
   }, [])
 
-  const listFor = (key: ListKey) => (key === HIDDEN_KEY ? hidden : saved)
-  // Always read the latest lists from storage before writing, so a click made before the
-  // popup finished loading (or while a page changed the list) can't overwrite them.
-  const add = async (key: ListKey, id: string) => {
-    const ids = toIds((await chrome.storage.local.get(key))[key])
-    if (!ids.includes(id)) await chrome.storage.local.set({ [key]: [...ids, id] })
+  // Always read the latest list from storage before writing, so a click made before the
+  // popup finished loading (or while a page changed the list) can't overwrite it.
+  const readHidden = async () => toIds((await chrome.storage.local.get(HIDDEN_KEY))[HIDDEN_KEY])
+  const add = async (id: string) => {
+    const ids = await readHidden()
+    if (!ids.includes(id)) await chrome.storage.local.set({ [HIDDEN_KEY]: [...ids, id] })
   }
-  const remove = async (key: ListKey, id: string) => {
-    const ids = toIds((await chrome.storage.local.get(key))[key])
-    await chrome.storage.local.set({ [key]: ids.filter((x) => x !== id) })
+  const remove = async (id: string) => {
+    const ids = await readHidden()
+    await chrome.storage.local.set({ [HIDDEN_KEY]: ids.filter((x) => x !== id) })
   }
-  const toggle = (key: ListKey, id: string) =>
-    listFor(key).includes(id) ? remove(key, id) : add(key, id)
 
-  const isSaved = currentId !== null && saved.includes(currentId)
   const isHidden = currentId !== null && hidden.includes(currentId)
 
   return (
@@ -100,12 +88,9 @@ function App() {
             <strong className="listing-id">#{currentId}</strong>
           </div>
           <div className="actions">
-            <button className={`pill pill-save${isSaved ? ' is-on' : ''}`} onClick={() => toggle(SAVED_KEY, currentId)}>
-              {isSaved ? '★ Saved' : '☆ Save'}
-            </button>
             <button
               className={`pill pill-hide${isHidden ? ' is-on' : ''}`}
-              onClick={() => toggle(HIDDEN_KEY, currentId)}
+              onClick={() => (isHidden ? remove(currentId) : add(currentId))}
               title={isHidden ? 'Click to unhide' : 'Hide from search results'}
             >
               {isHidden ? '✓ Hidden' : '✕ Hide'}
@@ -117,25 +102,11 @@ function App() {
       <CommuteSettings />
 
       <section className="card lists-card">
-        <div className="segmented" role="tablist" aria-label="Lists">
-          {(['saved', 'hidden'] as const).map((t) => (
-            <button
-              key={t}
-              role="tab"
-              aria-selected={tab === t}
-              className={tab === t ? 'is-active' : ''}
-              onClick={() => setTab(t)}
-            >
-              {t === 'saved' ? 'Saved' : 'Hidden'}
-              <span className="count">{(t === 'saved' ? saved : hidden).length}</span>
-            </button>
-          ))}
+        <div className="list-header">
+          <h2>Hidden listings</h2>
+          <span className="count">{hidden.length}</span>
         </div>
-        {tab === 'saved' ? (
-          <IdList ids={saved} onRemove={(id) => remove(SAVED_KEY, id)} empty="No saved listings yet: use ☆ Save on any listing." />
-        ) : (
-          <IdList ids={hidden} onRemove={(id) => remove(HIDDEN_KEY, id)} empty="Nothing hidden yet." />
-        )}
+        <IdList ids={hidden} onRemove={remove} empty="Nothing hidden yet: use ✕ Hide on any listing." />
       </section>
     </main>
   )
