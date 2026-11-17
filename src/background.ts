@@ -32,9 +32,13 @@ export const DEFAULT_DAY = 2; // Tuesday (0 = Sunday)
 export interface LatLon { lat: number; lon: number }
 export interface Place extends LatLon { name: string }
 
-export type CommuteResult =
+/** What the content script needs to build a "check in Google Maps" link. Not cached. */
+export interface MapsInfo { origin: string; dest: string; arriveIso: string }
+
+export type CommuteResult = (
   | { status: 'ok'; minutes: number; leaveBy: string; arriveAt: string; lines: string[]; transfers: number }
-  | { status: 'error'; reason: 'disabled' | 'no-destination' | 'address-not-found' | 'no-route' | 'daily-limit' | 'network' };
+  | { status: 'error'; reason: 'disabled' | 'no-destination' | 'address-not-found' | 'no-route' | 'daily-limit' | 'network' }
+) & { maps?: MapsInfo };
 
 export type BgMessage =
   | { type: 'commute'; listingId: string; coords?: LatLon; address?: string }
@@ -229,24 +233,40 @@ if (isServiceWorker) {
     if (!dest) return { status: 'error', reason: 'no-destination' };
     const day = typeof s[COMMUTE_KEYS.day] === 'number' ? s[COMMUTE_KEYS.day] : DEFAULT_DAY;
     const arrival = typeof s[COMMUTE_KEYS.arrival] === 'string' ? s[COMMUTE_KEYS.arrival] : DEFAULT_ARRIVAL;
+    const arriveIso = nextArrivalIso(day, arrival);
+    const ll = (p: LatLon) => `${p.lat},${p.lon}`;
 
     // Origin coordinates: exact (detail page) > remembered from detail page > geocoded address.
     let from: LatLon | null = msg.coords ?? s[COORDS_KEY]?.[msg.listingId] ?? null;
-    if (msg.coords) {
-      const { [COORDS_KEY]: all = {} } = await local.get(COORDS_KEY);
-      await local.set({ [COORDS_KEY]: { ...all, [msg.listingId]: msg.coords } });
-    }
-    if (!from && msg.address) from = await cachedGeocode(msg.address);
-    if (!from) return { status: 'error', reason: 'address-not-found' };
+    // Link info even if lookups fail below: Google can still try the raw address.
+    const maps: MapsInfo | undefined = from || msg.address
+      ? { origin: from ? ll(from) : msg.address!, dest: ll(dest), arriveIso }
+      : undefined;
+    const withMaps = (r: CommuteResult): CommuteResult => ({ ...r, maps });
 
-    const key = `${msg.listingId}|${from.lat.toFixed(5)},${from.lon.toFixed(5)}|${dest.lat},${dest.lon}|${day}|${arrival}`;
+    try {
+      if (msg.coords) {
+        const { [COORDS_KEY]: all = {} } = await local.get(COORDS_KEY);
+        await local.set({ [COORDS_KEY]: { ...all, [msg.listingId]: msg.coords } });
+      }
+      if (!from && msg.address) from = await cachedGeocode(msg.address);
+      if (!from) return withMaps({ status: 'error', reason: 'address-not-found' });
+      if (maps) maps.origin = ll(from);
+      const key = `${msg.listingId}|${from.lat.toFixed(5)},${from.lon.toFixed(5)}|${dest.lat},${dest.lon}|${day}|${arrival}`;
+      return withMaps(await routeCached(key, from, dest, arriveIso));
+    } catch {
+      return withMaps({ status: 'error', reason: 'network' });
+    }
+  }
+
+  /** Cached (without the per-call `maps` info) and quota-limited route lookup. */
+  async function routeCached(key: string, from: LatLon, dest: LatLon, arriveIso: string): Promise<CommuteResult> {
     const { [CACHE_KEY]: cache = {} } = await local.get(CACHE_KEY);
     const hit = cache[key];
     if (hit && Date.now() - hit.at < CACHE_TTL_MS) return hit.result;
 
     if (!(await takePlanQuota())) return { status: 'error', reason: 'daily-limit' };
-    const arriveIso = nextArrivalIso(day, arrival);
-    const its = await throttled(() => plan(from!, dest, arriveIso));
+    const its = await throttled(() => plan(from, dest, arriveIso));
     const best = pickItinerary(its, arriveIso);
     const result: CommuteResult = best ? summarize(best) : { status: 'error', reason: 'no-route' };
 

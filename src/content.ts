@@ -104,6 +104,7 @@ function applyStyle(): void {
 #lb-hider-detail-actions:not(.is-inline) .lb-hider-btn { font-size: 14px; padding: 10px 16px; }
 .lb-title-row { display: flex !important; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 #lb-hider-detail-actions.is-inline { position: static; flex: none; }
+.lb-commute.is-inline { margin: 0; flex: none; }
 #lb-commute-detail.is-inline { position: static; flex: none; margin: 0; box-shadow: none; font-size: 13px; padding: 4px 10px; }
 .lb-hider-btn {
   font: 600 12px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -119,10 +120,13 @@ function applyStyle(): void {
 .lb-hider-hide.is-on { color: #2e7d32; }
 .lb-hider-hide.is-on:hover { background: #2e7d32; color: #fff; border-color: #2e7d32; }
 .lb-commute {
-  display: inline-block; margin: 6px 0 2px; padding: 3px 8px; border-radius: 6px;
+  display: inline-flex; align-items: center; gap: 6px; margin: 6px 0 2px; padding: 3px 8px; border-radius: 6px;
   font: 600 12px/1.3 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   background: #e8f0fe; color: #174ea6; border: 1px solid #c6d7f5;
 }
+.lb-maps-link { display: inline-flex; color: inherit !important; opacity: .7; text-decoration: none !important; }
+.lb-maps-link:hover { opacity: 1; }
+.lb-maps-link svg { width: 14px; height: 14px; }
 .lb-commute.is-error { background: #f5f5f5; color: #666; border-color: #ddd; font-weight: 500; }
 #lb-commute-detail {
   position: fixed; bottom: 70px; right: 20px; z-index: 2147483647; margin: 0;
@@ -222,9 +226,11 @@ function decorateCards(): void {
 
 // ---------- commute ----------
 
-type CommuteResult =
+interface MapsInfo { origin: string; dest: string; arriveIso: string }
+type CommuteResult = (
   | { status: 'ok'; minutes: number; leaveBy: string; arriveAt: string; lines: string[]; transfers: number }
-  | { status: 'error'; reason: string };
+  | { status: 'error'; reason: string }
+) & { maps?: MapsInfo };
 
 let commuteGen = 0; // bumps when settings change, so stale responses are dropped
 
@@ -237,11 +243,72 @@ function fmtArrival(hhmm: string): string {
   return `${((h + 11) % 12) + 1}:${String(m).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`;
 }
 
+/**
+ * Google Maps transit directions with "Arrive by" pre-set. Undocumented `data=` format:
+ * 3e3 = transit, 6e1 = arrive by, 8j = arrival as local wall-clock time written as if UTC (seconds).
+ * If Google ever ignores `data=`, the link still opens the right origin/destination.
+ */
+function mapsUrl(m: MapsInfo): string {
+  const [, y, mo, d, h, mi] = m.arriveIso.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/)!.map(Number);
+  const seconds = Date.UTC(y, mo - 1, d, h, mi) / 1000;
+  const part = (p: string) => encodeURIComponent(p).replace(/%2C/g, ',');
+  return `https://www.google.com/maps/dir/${part(m.origin)}/${part(m.dest)}/data=!4m6!4m5!2m3!6e1!7e2!8j${seconds}!3e3`;
+}
+
+const SVG_NS = 'http://www.w3.org/2000/svg';
+function externalIcon(): SVGSVGElement {
+  const svg = document.createElementNS(SVG_NS, 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('fill', 'none');
+  svg.setAttribute('stroke', 'currentColor');
+  svg.setAttribute('stroke-width', '2.2');
+  svg.setAttribute('stroke-linecap', 'round');
+  svg.setAttribute('stroke-linejoin', 'round');
+  svg.setAttribute('aria-hidden', 'true');
+  for (const d of ['M14 4h6v6', 'M20 4l-9 9', 'M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5']) {
+    const path = document.createElementNS(SVG_NS, 'path');
+    path.setAttribute('d', d);
+    svg.appendChild(path);
+  }
+  return svg;
+}
+
+/** Badge = <span class="lb-commute-text"> + optional Google Maps link. */
+function badgeParts(badge: HTMLElement): { text: HTMLElement; link: HTMLAnchorElement } {
+  let text = badge.querySelector<HTMLElement>(':scope > .lb-commute-text');
+  let link = badge.querySelector<HTMLAnchorElement>(':scope > .lb-maps-link');
+  if (!text || !link) {
+    badge.textContent = '';
+    text = document.createElement('span');
+    text.className = 'lb-commute-text';
+    link = document.createElement('a');
+    link.className = 'lb-maps-link';
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    link.hidden = true;
+    link.append(externalIcon());
+    // Don't let LeaseBreak's card click handlers react to this click.
+    link.addEventListener('click', (e) => e.stopPropagation());
+    badge.append(text, link);
+  }
+  return { text, link };
+}
+
 function renderCommute(badge: HTMLElement, r: CommuteResult): void {
   badge.classList.toggle('is-error', r.status !== 'ok');
+  const { text, link } = badgeParts(badge);
+  if (r.maps) {
+    const href = mapsUrl(r.maps);
+    if (link.href !== href) link.href = href;
+    const day = new Intl.DateTimeFormat('en-US', { weekday: 'short', timeZone: 'UTC' })
+      .format(new Date(`${r.maps.arriveIso.slice(0, 10)}T12:00:00Z`));
+    link.title = `Check in Google Maps (arrive by ${fmtArrival(commuteArrival)} ${day})`;
+    link.setAttribute('aria-label', link.title);
+  }
+  link.hidden = !r.maps;
   if (r.status === 'ok') {
     const lines = r.lines.length ? ` · ${r.lines.join('→')}` : '';
-    setText(badge, `🚇 ${r.minutes} min · leave ${fmtTime(r.leaveBy)}${lines}`);
+    setText(text, `🚇 ${r.minutes} min · leave ${fmtTime(r.leaveBy)}${lines}`);
     badge.title = `Leave ${fmtTime(r.leaveBy)}, arrive ${fmtTime(r.arriveAt)} ` +
       `(${r.transfers} transfer${r.transfers === 1 ? '' : 's'}). Routing: Transitous`;
     return;
@@ -252,7 +319,7 @@ function renderCommute(badge: HTMLElement, r: CommuteResult): void {
     'daily-limit': '🚇 Daily commute lookup limit reached',
     network: '🚇 Commute lookup failed',
   };
-  setText(badge, msg[r.reason] ?? '');
+  setText(text, msg[r.reason] ?? '');
   badge.hidden = !(r.reason in msg);
 }
 
@@ -260,7 +327,9 @@ function requestCommute(badge: HTMLElement, msg: Record<string, unknown>): void 
   if (badge.dataset.lbRequested) return;
   badge.dataset.lbRequested = '1';
   const gen = commuteGen;
-  setText(badge, '🚇 …');
+  const { text, link } = badgeParts(badge);
+  link.hidden = true;
+  setText(text, '🚇 …');
   chrome.runtime.sendMessage({ type: 'commute', ...msg })
     .then((r: CommuteResult) => { if (gen === commuteGen && badge.isConnected) renderCommute(badge, r); })
     .catch(() => { badge.hidden = true; }); // e.g. extension reloaded
@@ -276,7 +345,8 @@ const cardObserver = new IntersectionObserver((entries) => {
     if (!card) continue;
     // "Lower East Side, Manhattan" -> use only the borough; neighborhood names confuse the geocoder.
     const street = card.querySelector('h3')?.textContent?.trim();
-    const borough = card.querySelector('.search-item-header-col .text')?.textContent?.split(',').pop()?.trim();
+    const areaEl = card.querySelector('.search-item-header-col .text');
+    const borough = areaEl ? ownText(areaEl).split(',').pop()?.trim() : undefined; // ignore our badge's text
     requestCommute(badge, {
       listingId: badge.dataset.lbId,
       address: street ? [street, borough].filter(Boolean).join(', ') : undefined,
@@ -292,8 +362,14 @@ function decorateCommuteCards(): void {
     const badge = document.createElement('div');
     badge.className = 'lb-commute';
     badge.dataset.lbId = id;
+    // Same line as "Chelsea / Hudson Yards, Manhattan", pushed to the right.
+    const area = card.querySelector<HTMLElement>('.search-item-header-col .header .text');
     const header = card.querySelector('.search-item-header-col .header');
-    if (header) header.after(badge);
+    if (area) {
+      area.classList.add('lb-title-row');
+      badge.classList.add('is-inline');
+      area.appendChild(badge);
+    } else if (header) header.after(badge);
     else (card.querySelector('.search-item-header-col') ?? card).appendChild(badge);
     cardObserver.observe(badge);
   });
