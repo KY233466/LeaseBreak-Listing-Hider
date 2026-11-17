@@ -7,7 +7,7 @@ A Chrome extension (only active on `https://www.leasebreak.com`) that hides list
 - Listings are tracked by ID, e.g. `410557` from `https://www.leasebreak.com/short-term-rental-details/410557/just-posted`.
 - On search pages (e.g. `/advanced-search?page=2`), any `<div id="listing{ID}">` for a hidden ID is hidden with CSS.
 - Ways to hide a listing:
-  - **Listing page:** click the floating "✕ Not interested" button (bottom-right). Click again to undo.
+  - **Listing page:** Save and Hide sit on the title line, and the commute time. If the page doesn't have that title block, they float in the bottom-right corner instead.
   - **Search results:** click "✕ Hide" in the top-right corner of a card.
   - **Popup:** click the extension icon, then paste an ID or URL, or click "Hide" for the listing you're on.
 - **Save:** each card and listing page also has a "☆ Save" button. Saved listings get a soft yellow background in search results. Click again to unsave.

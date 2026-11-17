@@ -101,7 +101,10 @@ function applyStyle(): void {
 .lb-hider-actions { display: flex; gap: 6px; }
 .lb-hider-card-actions { position: absolute; top: 8px; right: 8px; z-index: 50; }
 #lb-hider-detail-actions { position: fixed; bottom: 20px; right: 20px; z-index: 2147483647; }
-#lb-hider-detail-actions .lb-hider-btn { font-size: 14px; padding: 10px 16px; }
+#lb-hider-detail-actions:not(.is-inline) .lb-hider-btn { font-size: 14px; padding: 10px 16px; }
+.lb-title-row { display: flex !important; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+#lb-hider-detail-actions.is-inline { position: static; flex: none; }
+#lb-commute-detail.is-inline { position: static; flex: none; margin: 0; box-shadow: none; font-size: 13px; padding: 4px 10px; }
 .lb-hider-btn {
   font: 600 12px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   border: 1px solid currentColor; background: #fff;
@@ -165,15 +168,44 @@ function updateButtons(): void {
   });
 }
 
+/** Listing-page title block */
+function detailTitle(): { title: HTMLElement; subtitle: HTMLElement } | null {
+  const box = document.querySelector('.title-detail-apartments-col-55');
+  const title = box?.querySelector<HTMLElement>('h2');
+  const subtitle = box?.querySelector<HTMLElement>('.title-detail-apartments-text');
+  return title && subtitle ? { title, subtitle } : null;
+}
+
+/** Text of an element ignoring anything we inserted into it. */
+const ownText = (el: Element) =>
+  Array.from(el.childNodes).filter((n) => n.nodeType === Node.TEXT_NODE).map((n) => n.textContent).join('').trim();
+
+/**
+ * Put `el` at the end of `row` (spaced apart from the site's text) when the title block exists;
+ * otherwise float it in the corner. Re-run safely: moves it inline if the title appears later.
+ */
+function placeDetailEl(el: HTMLElement, row: HTMLElement | undefined): void {
+  if (row) {
+    if (el.parentElement === row) return;
+    row.classList.add('lb-title-row');
+    el.classList.add('is-inline');
+    row.appendChild(el);
+  } else if (!el.isConnected) {
+    document.body.appendChild(el);
+  }
+}
+
 function renderDetailButtons(): void {
   const m = location.pathname.match(DETAIL_RE);
-  if (!m || document.getElementById('lb-hider-detail-actions')) return;
-  const id = m[1];
-  const wrap = document.createElement('div');
-  wrap.id = 'lb-hider-detail-actions';
-  wrap.className = 'lb-hider-actions';
-  wrap.append(makeButton('save', id), makeButton('hide', id));
-  document.body.appendChild(wrap);
+  if (!m) return;
+  let wrap = document.getElementById('lb-hider-detail-actions');
+  if (!wrap) {
+    wrap = document.createElement('div');
+    wrap.id = 'lb-hider-detail-actions';
+    wrap.className = 'lb-hider-actions';
+    wrap.append(makeButton('save', m[1]), makeButton('hide', m[1]));
+  }
+  placeDetailEl(wrap, detailTitle()?.title);
 }
 
 function decorateCards(): void {
@@ -279,16 +311,22 @@ function detailCoords(): { lat: number; lon: number } | undefined {
 
 function renderDetailCommute(): void {
   const id = location.pathname.match(DETAIL_RE)?.[1];
-  if (!id || !commuteEnabled || document.getElementById('lb-commute-detail')) return;
-  const badge = document.createElement('div');
-  badge.id = 'lb-commute-detail';
-  badge.className = 'lb-commute';
-  document.body.appendChild(badge);
-  const h1 = document.querySelector('h1')?.textContent?.trim();
+  if (!id || !commuteEnabled) return;
+  const t = detailTitle();
+  let badge = document.getElementById('lb-commute-detail');
+  if (!badge) {
+    badge = document.createElement('div');
+    badge.id = 'lb-commute-detail';
+    badge.className = 'lb-commute';
+  }
+  placeDetailEl(badge, t?.subtitle);
+  // Fallback address if the page has no coordinates.
+  const street = t ? ownText(t.title) : document.querySelector('h1')?.textContent?.trim();
+  const borough = t ? ownText(t.subtitle).split(',').pop()?.trim() : undefined;
   requestCommute(badge, {
     listingId: id,
     coords: detailCoords(),
-    address: h1 || undefined,
+    address: street ? [street, borough].filter(Boolean).join(', ') : undefined,
   });
 }
 
@@ -344,14 +382,18 @@ async function init(): Promise<void> {
     new MutationObserver(() => {
       if (pending) return;
       pending = true;
-      requestAnimationFrame(() => {
+      // setTimeout, not requestAnimationFrame: rAF is paused in background tabs.
+      setTimeout(() => {
         pending = false;
         if (!document.getElementById(STYLE_ID)) applyStyle();
         decorateCards();
         updateButtons();
         autoHideScan();
         decorateCommuteCards();
-      });
+        renderDetailButtons(); // no-ops once placed; moves them inline if the title renders late
+        renderDetailCommute();
+        updateButtons();
+      }, 50);
     }).observe(document.body, { childList: true, subtree: true });
   };
 
