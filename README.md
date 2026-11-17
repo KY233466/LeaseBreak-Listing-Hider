@@ -6,6 +6,7 @@ A Chrome extension (only active on `https://www.leasebreak.com`) that hides list
 
 - Listings are tracked by ID, e.g. `410557` from `https://www.leasebreak.com/short-term-rental-details/410557/just-posted`.
 - On search pages (e.g. `/advanced-search?page=2`), any `<div id="listing{ID}">` for a hidden ID is hidden with CSS.
+- In the search **map view**, hidden listings are removed from the left column (the pins on the Google map itself can't be hidden). Saved ones get the yellow background, each item has Save/Hide on its address line, and the transit time sits on its neighborhood line (using the listing's map coordinates).
 - Ways to hide a listing:
   - **Listing page:** Save and Hide sit on the title line, and the commute time. If the page doesn't have that title block, they float in the bottom-right corner instead.
   - **Search results:** click "✕ Hide" in the top-right corner of a card.

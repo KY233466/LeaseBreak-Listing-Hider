@@ -45,8 +45,12 @@ function toggleId(key: ListKey, id: string): Promise<void> {
   });
 }
 
+// Search list cards carry the id; map-view cards only link to it.
 const selectorsFor = (ids: string[]) =>
-  ids.filter((id) => /^\d+$/.test(id)).map((id) => `#listing${id}`);
+  ids.filter((id) => /^\d+$/.test(id)).flatMap((id) => [
+    `#listing${id}`,
+    `.map-listing:has(.map-listing-info-address a[href*="-details/${id}/"])`,
+  ]);
 
 function applyStyle(): void {
   let style = document.getElementById(STYLE_ID) as HTMLStyleElement | null;
@@ -68,6 +72,10 @@ function applyStyle(): void {
 .lb-title-row { display: flex !important; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 #lb-hider-detail-actions.is-inline { position: static; z-index: auto; flex: none; }
 .lb-commute.is-inline { margin: 0; flex: none; }
+.map-listing-info-address.lb-title-row { flex-wrap: nowrap; align-items: flex-start; }
+.lb-hider-map-actions { flex: none; gap: 4px; }
+.lb-hider-map-actions .lb-hider-btn { font-size: 11px; padding: 4px 7px; box-shadow: none; }
+.map-listing-info-borough.lb-title-row .lb-commute { font-size: 11px; padding: 2px 6px; }
 #lb-commute-detail.is-inline { position: static; z-index: auto; flex: none; margin: 0; box-shadow: none; font-size: 13px; padding: 4px 10px; }
 .lb-hider-btn {
   font: 600 12px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -184,6 +192,29 @@ function decorateCards(): void {
     wrap.className = 'lb-hider-actions lb-hider-card-actions';
     wrap.append(makeButton('save', m[1]), makeButton('hide', m[1]));
     card.appendChild(wrap);
+  });
+}
+
+// ---------- map view (left column next to the Google map) ----------
+
+const mapListingId = (item: Element) =>
+  item.querySelector<HTMLAnchorElement>('.map-listing-info-address a')?.getAttribute('href')?.match(DETAIL_RE)?.[1];
+
+/** Save/Hide on the address line ("168 India Street"), pushed right. */
+function decorateMapListings(): void {
+  document.querySelectorAll<HTMLElement>('.map-listing').forEach((item) => {
+    const id = mapListingId(item);
+    const row = item.querySelector<HTMLElement>('.map-listing-info-address');
+    if (!id || !row) return;
+    const old = row.querySelector<HTMLElement>(':scope > .lb-hider-map-actions');
+    if (old?.dataset.lbId === id) return;
+    old?.remove(); // the site reused this element for another listing
+    const wrap = document.createElement('div');
+    wrap.className = 'lb-hider-actions lb-hider-map-actions';
+    wrap.dataset.lbId = id;
+    wrap.append(makeButton('save', id), makeButton('hide', id));
+    row.classList.add('lb-title-row');
+    row.appendChild(wrap);
   });
 }
 
@@ -304,6 +335,20 @@ const cardObserver = new IntersectionObserver((entries) => {
     if (!e.isIntersecting) continue;
     const badge = e.target as HTMLElement;
     cardObserver.unobserve(badge);
+    const mapItem = badge.closest<HTMLElement>('.map-listing');
+    if (mapItem) {
+      const link = mapItem.querySelector<HTMLElement>('.js-view-on-map, [data-lat][data-lng]');
+      const lat = Number(link?.dataset.lat), lon = Number(link?.dataset.lng);
+      const street = mapItem.querySelector('.map-listing-info-address a')?.textContent?.trim();
+      const boroughEl = mapItem.querySelector('.map-listing-info-borough');
+      const borough = boroughEl ? ownText(boroughEl).split(',').pop()?.trim() : undefined;
+      requestCommute(badge, {
+        listingId: badge.dataset.lbId,
+        coords: Number.isFinite(lat) && Number.isFinite(lon) && lat && lon ? { lat, lon } : undefined,
+        address: street ? [street, borough].filter(Boolean).join(', ') : undefined,
+      });
+      continue;
+    }
     const card = badge.closest<HTMLElement>('.search-item');
     if (!card) continue;
     // "Lower East Side, Manhattan" -> use only the borough; neighborhood names confuse the geocoder.
@@ -334,6 +379,21 @@ function decorateCommuteCards(): void {
       area.appendChild(badge);
     } else if (header) header.after(badge);
     else (card.querySelector('.search-item-header-col') ?? card).appendChild(badge);
+    cardObserver.observe(badge);
+  });
+  // Map view: badge on the "Greenpoint, Brooklyn" line, pushed right.
+  document.querySelectorAll<HTMLElement>('.map-listing').forEach((item) => {
+    const id = mapListingId(item);
+    const row = item.querySelector<HTMLElement>('.map-listing-info-borough');
+    if (!id || !row) return;
+    const old = row.querySelector<HTMLElement>(':scope > .lb-commute');
+    if (old?.dataset.lbId === id) return;
+    if (old) { cardObserver.unobserve(old); old.remove(); }
+    const badge = document.createElement('div');
+    badge.className = 'lb-commute is-inline';
+    badge.dataset.lbId = id;
+    row.classList.add('lb-title-row');
+    row.appendChild(badge);
     cardObserver.observe(badge);
   });
 }
@@ -379,6 +439,7 @@ function refreshUi(): void {
   if (!document.body) return;
   renderDetailButtons();
   decorateCards();
+  decorateMapListings();
   updateButtons();
   decorateCommuteCards();
   renderDetailCommute();
@@ -389,7 +450,7 @@ const extensionAlive = () => { try { return !!chrome.runtime?.id; } catch { retu
 
 /** Remove buttons/badges left behind by a previous (now disconnected) copy of this script. */
 function removeLeftovers(): void {
-  document.querySelectorAll('#lb-hider-detail-actions, #lb-commute-detail, .lb-hider-card-actions, .lb-commute')
+  document.querySelectorAll('#lb-hider-detail-actions, #lb-commute-detail, .lb-hider-card-actions, .lb-hider-map-actions, .lb-commute')
     .forEach((el) => el.remove());
 }
 
@@ -436,6 +497,7 @@ async function init(): Promise<void> {
         pending = false;
         if (!document.getElementById(STYLE_ID)) applyStyle();
         decorateCards();
+        decorateMapListings();
         updateButtons();
         decorateCommuteCards();
         renderDetailButtons(); // no-ops once placed; moves them inline if the title renders late
