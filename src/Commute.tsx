@@ -8,7 +8,7 @@ const KEYS = {
   arrival: 'commuteArrival',
   day: 'commuteDay',
 } as const
-const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
 export function CommuteSettings() {
   const [enabled, setEnabled] = useState(false)
@@ -53,30 +53,41 @@ export function CommuteSettings() {
   }
 
   return (
-    <section className="commute">
-      <h2>Commute</h2>
-      <label className="toggle">
+    <section className="card commute-card">
+      <div className="card-header">
+        <div>
+          <h2>🚇 Commute</h2>
+          <p className="subtle">Transit time on every listing</p>
+        </div>
         <input
           type="checkbox"
+          role="switch"
+          className="switch"
           checked={enabled}
           disabled={!dest}
+          title={dest ? (enabled ? 'Turn off' : 'Turn on') : 'Set a destination first'}
+          aria-label="Show transit time on listings"
           onChange={(e) => { setEnabled(e.target.checked); save({ [KEYS.enabled]: e.target.checked }) }}
         />
-        <span>Show transit time on listings</span>
-      </label>
+      </div>
 
-      <p className="dest">
-        To: {dest ? <strong>{dest.name}</strong> : <em>no destination set</em>}
-      </p>
+      <div className={`dest${dest ? '' : ' is-empty'}`}>
+        <svg className="pin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21z" />
+          <circle cx="12" cy="9.5" r="2.5" />
+        </svg>
+        {dest ? <strong>{dest.name}</strong> : <span>No destination yet</span>}
+      </div>
 
-      <form onSubmit={search}>
+      <form className="search" onSubmit={search}>
         <input
+          className="field"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder={dest ? 'Change destination…' : 'Destination address'}
+          placeholder={dest ? 'Change destination…' : 'Address or place'}
           aria-label="Destination address"
         />
-        <button type="submit" disabled={busy}>{busy ? '…' : 'Find'}</button>
+        <button type="submit" className="btn-primary" disabled={busy}>{busy ? '…' : 'Find'}</button>
       </form>
       {matches && (
         matches.length === 0
@@ -84,7 +95,7 @@ export function CommuteSettings() {
           : <ul className="matches">
               {matches.map((m) => (
                 <li key={`${m.lat},${m.lon}`}>
-                  <button type="button" className="link pick" onClick={() => pick(m)}>{m.name}</button>
+                  <button type="button" onClick={() => pick(m)}>{m.name}</button>
                 </li>
               ))}
             </ul>
@@ -94,11 +105,12 @@ export function CommuteSettings() {
         <span>Arrive by</span>
         <input
           type="time"
+          className="field field-sm"
           value={arrival}
           onChange={(e) => { if (e.target.value) { setArrival(e.target.value); save({ [KEYS.arrival]: e.target.value }) } }}
         />
         <span>on</span>
-        <select value={day} onChange={(e) => { const d = Number(e.target.value); setDay(d); save({ [KEYS.day]: d }) }}>
+        <select className="field field-sm" value={day} onChange={(e) => { const d = Number(e.target.value); setDay(d); save({ [KEYS.day]: d }) }}>
           {DAYS.map((name, i) => <option key={name} value={i}>{name}</option>)}
         </select>
       </div>
