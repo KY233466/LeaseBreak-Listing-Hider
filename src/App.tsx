@@ -1,12 +1,11 @@
 import { useEffect, useState } from 'react'
 import './App.css'
 import { CommuteSettings } from './Commute'
+import { HighlightSettings } from './Highlight'
 
-const HIDDEN_KEY = 'hiddenListingIds'
-
+const LISTERS_KEY = 'listerByListing'
+const CLOSE_TAB_KEY = 'closeTabAfterHide'
 const DETAIL_RE = /details\/(\d+)/i
-const toIds = (v: unknown): string[] => (Array.isArray(v) ? v.map(String) : [])
-const listingUrl = (id: string) => `https://www.leasebreak.com/short-term-rental-details/${id}/`
 
 function Logo() {
   return (
@@ -19,95 +18,83 @@ function Logo() {
   )
 }
 
-function IdList({ ids, onRemove, empty }: { ids: string[]; onRemove: (id: string) => void; empty: string }) {
-  if (ids.length === 0) return <p className="empty">{empty}</p>
+type HideStatus = 'ok' | 'warn' | 'tip'
+
+/** Whether the listing-page Hide buttons work on the active tab. */
+function useHideStatus(): HideStatus {
+  const [listingId, setListingId] = useState<string | null>(null)
+  const [listers, setListers] = useState<Record<string, string>>({})
+
+  useEffect(() => {
+    chrome.tabs.query({ active: true, currentWindow: true }, ([tab]) => {
+      const url = tab?.url ?? ''
+      if (url.startsWith('https://www.leasebreak.com/')) {
+        setListingId(new URL(url).pathname.match(DETAIL_RE)?.[1] ?? null)
+      }
+    })
+    chrome.storage.local.get(LISTERS_KEY, (res) => setListers(res[LISTERS_KEY] ?? {}))
+    const onChange = (changes: { [k: string]: chrome.storage.StorageChange }, area: string) => {
+      if (area === 'local' && LISTERS_KEY in changes) setListers(changes[LISTERS_KEY].newValue ?? {})
+    }
+    chrome.storage.onChanged.addListener(onChange)
+    return () => chrome.storage.onChanged.removeListener(onChange)
+  }, [])
+
+  if (!listingId) return 'tip'
+  return listers[listingId] ? 'ok' : 'warn'
+}
+
+function HideCard() {
+  const status = useHideStatus()
+  const [closeTab, setCloseTab] = useState(false)
+  useEffect(() => {
+    chrome.storage.local.get(CLOSE_TAB_KEY, (res) => setCloseTab(res[CLOSE_TAB_KEY] === true))
+  }, [])
   return (
-    <ul className="id-list">
-      {[...ids].reverse().map((id) => (
-        <li key={id}>
-          <a href={listingUrl(id)} target="_blank" rel="noreferrer">
-            Listing <strong>#{id}</strong>
-            <span className="open-icon" aria-hidden="true">↗</span>
-          </a>
-          <button className="icon-btn" onClick={() => onRemove(id)} title="Remove" aria-label={`Remove listing ${id}`}>
-            ×
-          </button>
-        </li>
-      ))}
-    </ul>
+    <section className="card">
+      <h2>🙈 Hide button on Listing's page</h2>
+      <p className="body">
+        Hiding a Listing or Lister can easily be undone at any time at the top of your search results.
+      </p>
+      {status === 'ok' && <p className="status is-ok">✓ Hide is available on this listing.</p>}
+      {status === 'warn' && (
+        <p className="status is-warn">
+          ⚠ Hide isn't available here yet. Open this listing from LeaseBreak search results (with the extension on),
+          then reload it.
+        </p>
+      )}
+      {status === 'tip' && (
+        <p className="status is-tip">
+          Tip: browse search results first. That's how the extension learns which lister posted each listing.
+        </p>
+      )}
+      <label className="toggle-row">
+        <span>
+          Close the tab after hiding from a Listing's page
+        </span>
+        <input
+          type="checkbox"
+          role="switch"
+          className="switch"
+          checked={closeTab}
+          aria-label="Close the tab after hiding from a listing page"
+          onChange={(e) => { setCloseTab(e.target.checked); chrome.storage.local.set({ [CLOSE_TAB_KEY]: e.target.checked }) }}
+        />
+      </label>
+    </section>
   )
 }
 
 function App() {
-  const [hidden, setHidden] = useState<string[]>([])
-  const [currentId, setCurrentId] = useState<string | null>(null)
-
-  useEffect(() => {
-    chrome.storage.local.get(HIDDEN_KEY, (res) => setHidden(toIds(res[HIDDEN_KEY])))
-    const onChange = (changes: { [k: string]: chrome.storage.StorageChange }, area: string) => {
-      if (area !== 'local') return
-      if (HIDDEN_KEY in changes) setHidden(toIds(changes[HIDDEN_KEY].newValue))
-    }
-    chrome.storage.onChanged.addListener(onChange)
-
-    chrome.tabs.query({ active: true, currentWindow: true }, ([tab]) => {
-      const url = tab?.url ?? ''
-      if (url.startsWith('https://www.leasebreak.com/')) {
-        const m = new URL(url).pathname.match(DETAIL_RE)
-        if (m) setCurrentId(m[1])
-      }
-    })
-    return () => chrome.storage.onChanged.removeListener(onChange)
-  }, [])
-
-  // Always read the latest list from storage before writing, so a click made before the
-  // popup finished loading (or while a page changed the list) can't overwrite it.
-  const readHidden = async () => toIds((await chrome.storage.local.get(HIDDEN_KEY))[HIDDEN_KEY])
-  const add = async (id: string) => {
-    const ids = await readHidden()
-    if (!ids.includes(id)) await chrome.storage.local.set({ [HIDDEN_KEY]: [...ids, id] })
-  }
-  const remove = async (id: string) => {
-    const ids = await readHidden()
-    await chrome.storage.local.set({ [HIDDEN_KEY]: ids.filter((x) => x !== id) })
-  }
-
-  const isHidden = currentId !== null && hidden.includes(currentId)
-
   return (
     <main>
       <header className="app-header">
         <Logo />
-        <h1>LeaseBreak Listing Hider</h1>
+        <h1>LeaseBreak Commute</h1>
       </header>
-
-      {currentId && (
-        <section className="card listing-card">
-          <div className="listing-info">
-            <span className="eyebrow">This listing</span>
-            <strong className="listing-id">#{currentId}</strong>
-          </div>
-          <div className="actions">
-            <button
-              className={`pill pill-hide${isHidden ? ' is-on' : ''}`}
-              onClick={() => (isHidden ? remove(currentId) : add(currentId))}
-              title={isHidden ? 'Click to unhide' : 'Hide from search results'}
-            >
-              {isHidden ? '✓ Hidden' : '✕ Hide'}
-            </button>
-          </div>
-        </section>
-      )}
-
       <CommuteSettings />
-
-      <section className="card lists-card">
-        <div className="list-header">
-          <h2>Hidden listings</h2>
-          <span className="count">{hidden.length}</span>
-        </div>
-        <IdList ids={hidden} onRemove={remove} empty="Nothing hidden yet: use ✕ Hide on any listing." />
-      </section>
+      <HideCard />
+      <HighlightSettings />
     </main>
   )
 }

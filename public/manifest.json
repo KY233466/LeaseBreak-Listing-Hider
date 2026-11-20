@@ -1,11 +1,11 @@
 {
   "manifest_version": 3,
-  "name": "LeaseBreak Listing Hider",
-  "version": "1.1.0",
-  "description": "Hide, save and see transit commute times for LeaseBreak listings.",
+  "name": "LeaseBreak Commute",
+  "version": "2.0.0",
+  "description": "See public-transit commute times on LeaseBreak NYC listings, and spot the ones you saved at a glance.",
   "action": {
     "default_popup": "index.html",
-    "default_title": "LeaseBreak Listing Hider"
+    "default_title": "LeaseBreak Commute"
   },
   "background": {
     "service_worker": "background.js",

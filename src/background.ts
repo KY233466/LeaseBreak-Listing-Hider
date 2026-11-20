@@ -42,7 +42,8 @@ export type CommuteResult = (
 
 export type BgMessage =
   | { type: 'commute'; listingId: string; coords?: LatLon; address?: string }
-  | { type: 'geocode'; text: string };
+  | { type: 'geocode'; text: string }
+  | { type: 'closeTab' };
 
 // ---------- time helpers ----------
 
@@ -283,7 +284,7 @@ if (isServiceWorker) {
   // Load the new copy into them; it cleans up the old copy's buttons.
   chrome.runtime.onInstalled.addListener(async () => {
     // Settings from the removed "auto-hide Just a Room" feature.
-    local.remove(['autoHideJustARoom', 'autoHideExceptions', 'savedListingIds']).catch(() => {});
+    local.remove(['autoHideJustARoom', 'autoHideExceptions', 'savedListingIds', 'hiddenListingIds']).catch(() => {});
     const tabs = await chrome.tabs.query({ url: 'https://www.leasebreak.com/*' });
     for (const tab of tabs) {
       if (tab.id === undefined) continue;
@@ -291,7 +292,12 @@ if (isServiceWorker) {
     }
   });
 
-  chrome.runtime.onMessage.addListener((msg: BgMessage, _sender, sendResponse) => {
+  chrome.runtime.onMessage.addListener((msg: BgMessage, sender, sendResponse) => {
+    // "Close tab after hiding" (popup setting): only ever closes the tab that sent the message.
+    if (msg?.type === 'closeTab') {
+      if (sender.tab?.id !== undefined) chrome.tabs.remove(sender.tab.id).catch(() => {});
+      return false;
+    }
     if (msg?.type === 'commute') {
       const k = JSON.stringify(msg);
       let p = inflight.get(k);
